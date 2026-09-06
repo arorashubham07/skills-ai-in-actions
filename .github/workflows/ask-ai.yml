@@ -1,6 +1,7 @@
 name: Ask AI
+
 on:
-  workflow_dispatch:
+  workflow_dispatch
 
 permissions:
   models: read
