@@ -11,6 +11,7 @@ jobs:
   analyze:
     name: AI Issue Completeness
     runs-on: ubuntu-latest
+
     steps:
       - name: Analyze issue with AI
         id: ai-response
@@ -19,45 +20,58 @@ jobs:
           ISSUE_AUTHOR: ${{ github.event.issue.user.login }}
           ISSUE_TITLE: ${{ github.event.issue.title }}
           ISSUE_BODY: ${{ github.event.issue.body }}
+        shell: bash
         run: |
-          prompt=$(printf '%s\n' \
-            "New issue was opened by ${ISSUE_AUTHOR}" \
-            "Title: ${ISSUE_TITLE}" \
-            "Body:" \
-            "---" \
-            "${ISSUE_BODY}" \
-            "---")
+          set -euo pipefail
+
+          prompt=$(
+            printf '%s\n' \
+              "New issue was opened by ${ISSUE_AUTHOR}" \
+              "Title: ${ISSUE_TITLE}" \
+              "Body:" \
+              "---" \
+              "${ISSUE_BODY}" \
+              "---"
+          )
 
           response=$(
             jq -n \
-              --arg system "You are a GitHub issue assistant. Your task is to analyze newly opened issues for completeness.\n\nProvide concise, helpful suggestions, ask clarifying questions and identify any missing information that would help resolve the issue faster.\n\nAlways respond with ready-to-use markdown content (no code blocks) that can be posted directly as an issue comment.\n\nSign off as AI assistant." \
+              --arg system 'You are a GitHub issue assistant. Your task is to analyze newly opened issues for completeness. Provide concise, helpful suggestions, ask clarifying questions, and identify missing information.' \
               --arg prompt "$prompt" \
               '{
                 model: "gpt-4o-mini",
                 messages: [
-                  { role: "system", content: $system },
-                  { role: "user", content: $prompt }
+                  {
+                    role: "system",
+                    content: $system
+                  },
+                  {
+                    role: "user",
+                    content: $prompt
+                  }
                 ],
                 temperature: 0.7
               }' |
-            curl -fsS https://api.openai.com/v1/chat/completions \
+            curl --fail-with-body --silent --show-error \
+              https://api.openai.com/v1/chat/completions \
               -H "Authorization: Bearer ${OPENAI_API_KEY}" \
               -H "Content-Type: application/json" \
-              -d @-
+              --data @-
           )
 
-          message=$(echo "$response" | jq -er '.choices[0].message.content')
+          message=$(printf '%s' "$response" | jq -er '.choices[0].message.content')
+
+          delimiter="ghadelimiter_${GITHUB_RUN_ID}_${GITHUB_RUN_ATTEMPT}"
 
           {
-            echo "response<<EOF"
-            echo "$message"
-            echo "EOF"
+            echo "response<<${delimiter}"
+            printf '%s\n' "$message"
+            echo "$delimiter"
           } >> "$GITHUB_OUTPUT"
+
       - name: Comment results on the issue
         uses: peter-evans/create-or-update-comment@v4
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           issue-number: ${{ github.event.issue.number }}
           body: ${{ steps.ai-response.outputs.response }}
-
-            
