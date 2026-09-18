@@ -13,27 +13,49 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Validate OpenAI API key
+      - name: Validate Azure OpenAI configuration
         env:
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          AZURE_OPENAI_API_KEY: ${{ secrets.AZURE_OPENAI_API_KEY }}
+          AZURE_OPENAI_ENDPOINT: ${{ secrets.AZURE_OPENAI_ENDPOINT }}
+          AZURE_OPENAI_DEPLOYMENT: ${{ secrets.AZURE_OPENAI_DEPLOYMENT }}
         shell: bash
         run: |
           set -euo pipefail
 
-          if [[ -z "$OPENAI_API_KEY" ]]; then
-            echo "::error::OPENAI_API_KEY repository secret is missing"
+          if [[ -z "${AZURE_OPENAI_API_KEY}" ]]; then
+            echo "::error::AZURE_OPENAI_API_KEY secret is missing"
             exit 1
           fi
 
-          if [[ "$OPENAI_API_KEY" =~ [[:space:]] ]]; then
-            echo "::error::OPENAI_API_KEY contains whitespace"
+          if [[ -z "${AZURE_OPENAI_ENDPOINT}" ]]; then
+            echo "::error::AZURE_OPENAI_ENDPOINT secret is missing"
             exit 1
           fi
 
-      - name: Analyze issue with AI
+          if [[ -z "${AZURE_OPENAI_DEPLOYMENT}" ]]; then
+            echo "::error::AZURE_OPENAI_DEPLOYMENT secret is missing"
+            exit 1
+          fi
+
+          if [[ "${AZURE_OPENAI_API_KEY}" =~ [[:space:]] ]]; then
+            echo "::error::AZURE_OPENAI_API_KEY contains whitespace"
+            exit 1
+          fi
+
+          case "${AZURE_OPENAI_ENDPOINT}" in
+            https://*) ;;
+            *)
+              echo "::error::AZURE_OPENAI_ENDPOINT must be a full URL like https://sa-project.openai.azure.com/"
+              exit 1
+              ;;
+          esac
+
+      - name: Analyze issue with Azure OpenAI
         id: ai-response
         env:
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          AZURE_OPENAI_API_KEY: ${{ secrets.AZURE_OPENAI_API_KEY }}
+          AZURE_OPENAI_ENDPOINT: ${{ secrets.AZURE_OPENAI_ENDPOINT }}
+          AZURE_OPENAI_DEPLOYMENT: ${{ secrets.AZURE_OPENAI_DEPLOYMENT }}
           ISSUE_AUTHOR: ${{ github.event.issue.user.login }}
           ISSUE_TITLE: ${{ github.event.issue.title }}
           ISSUE_BODY: ${{ github.event.issue.body }}
@@ -51,12 +73,13 @@ jobs:
               "---"
           )
 
+          api_url="${AZURE_OPENAI_ENDPOINT%/}/openai/deployments/${AZURE_OPENAI_DEPLOYMENT}/chat/completions?api-version=2024-02-01"
+
           response=$(
             jq -n \
-              --arg system 'You are a GitHub issue assistant. Your task is to analyze newly opened issues for completeness. Provide concise, helpful suggestions, ask clarifying questions, and identify missing information.' \
+              --arg system 'You are a GitHub issue assistant. Your task is to analyze newly opened issues for completeness. Provide concise, helpful suggestions, ask clarifying questions, and identify missing details that would help the reporter fix or reproduce the problem.' \
               --arg prompt "$prompt" \
               '{
-                model: "gpt-4o-mini",
                 messages: [
                   {
                     role: "system",
@@ -67,12 +90,14 @@ jobs:
                     content: $prompt
                   }
                 ],
-                temperature: 0.7
+                temperature: 0.7,
+                max_tokens: 500
               }' |
             curl --fail-with-body --silent --show-error \
-              https://api.openai.com/v1/chat/completions \
-              -H "Authorization: Bearer ${OPENAI_API_KEY}" \
+              -X POST \
+              "${api_url}" \
               -H "Content-Type: application/json" \
+              -H "api-key: ${AZURE_OPENAI_API_KEY}" \
               --data @-
           )
 
