@@ -13,6 +13,23 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      - name: Validate OpenAI API key
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [[ -z "$OPENAI_API_KEY" ]]; then
+            echo "::error::OPENAI_API_KEY repository secret is missing"
+            exit 1
+          fi
+
+          if [[ "$OPENAI_API_KEY" =~ [[:space:]] ]]; then
+            echo "::error::OPENAI_API_KEY contains whitespace"
+            exit 1
+          fi
+
       - name: Analyze issue with AI
         id: ai-response
         env:
